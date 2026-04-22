@@ -48,9 +48,29 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
         this._setupAdjustOverlayOffsets();
         this._setupShowOverlay();
         this._setupHideOverlay();
+
+        // Update all previews when settings change
+        this._settingsIds = [];
+        const settingsToWatch = [
+            'window-title-position',
+            'app-icon-position',
+            'show-app-icon',
+            'title-font-size',
+            'always-show-window-closebuttons'
+        ];
+        settingsToWatch.forEach(key => {
+            this._settingsIds.push(this._settings.connect(`changed::${key}`, () => {
+                this._updateAllWindows();
+            }));
+        });
     }
 
     disable() {
+        if (this._settingsIds) {
+            this._settingsIds.forEach(id => this._settings.disconnect(id));
+            this._settingsIds = null;
+        }
+
         if (this._objectPrototype) {
             this._objectPrototype.removeInjections(WindowPreview.WindowPreview.prototype);
             this._objectPrototype = null;
@@ -68,6 +88,22 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
         if (this._settings) {
             this._settings = null;
         }
+    }
+
+    _updateAllWindows() {
+        // Find all WindowPreview instances. This is a bit hacky but necessary to update existing previews.
+        // Usually they are children of Workspace actors.
+        const workspacesViews = Main.overview._overview._controls._workspacesDisplay._workspacesViews;
+        workspacesViews.forEach(wv => {
+            wv._workspaces.forEach(ws => {
+                ws._windows.forEach(wp => {
+                    this._applyTitleFontSize(wp);
+                    this._updateAppIcon(wp);
+                    this._updateTitle(wp);
+                    this._applyOverlayLayout(wp);
+                });
+            });
+        });
     }
 
     // --- Monkey-patch setup methods ---
@@ -113,8 +149,11 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
                 self._hideOrMove(this, flags);
 
                 // Dynamically act on text scaling changes
-                this._title.connectObject('notify::height', () => self._applyOverlayLayout(this), this);
-                this._icon.connectObject('notify::height', () => self._applyOverlayLayout(this), this);
+                const updateTranslations = () => {
+                    self._applyOverlayLayout(this);
+                };
+                this._title.connectObject('notify::height', updateTranslations, this);
+                this._icon.connectObject('notify::height', updateTranslations, this);
             }
         );
     }
@@ -244,35 +283,19 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
         const titleFactor = this._positionFactor(titlePos);
         const iconFactor = this._positionFactor(iconPos);
         
-        // 1. Reset standard translations
-        windowPreview._title.translation_y = 0;
-        windowPreview._icon.translation_y = 0;
-
-        // 2. Clear out legacy BindConstraints from title and icon completely
-        this._clearBindConstraints(windowPreview._title);
-        this._clearBindConstraints(windowPreview._icon);
-
         if (titleFactor === iconFactor) {
             // Stacked Block mode: User wants both at Center or both at Bottom.
             // We lock them together. Title goes BELOW Icon to maintain the pattern.
-            
-            this._setYAlign(windowPreview._title, titleFactor);
-            this._setYAlign(windowPreview._icon, titleFactor);
+            // NOTE: We assume constraints are already set to titleFactor by _updateAppIcon/_updateTitle
+            // which are called from _init or when settings change.
             
             windowPreview._title.translation_y = 0;
             windowPreview._icon.translation_y = -(titleHeight + GAP);
         } else {
             // Independent Zoning Mode: Title and Icon are in entirely different zones.
             // They just snap to their anchors naturally.
-            this._setYAlign(windowPreview._title, titleFactor);
-            this._setYAlign(windowPreview._icon, iconFactor);
-        }
-        
-        if (windowPreview._title.get_stage()) {
-            windowPreview._title.ensure_style();
-        }
-        if (windowPreview._icon.get_stage()) {
-            windowPreview._icon.ensure_style();
+            windowPreview._title.translation_y = 0;
+            windowPreview._icon.translation_y = 0;
         }
     }
 
@@ -303,7 +326,9 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
         for (const constraint of widget.get_constraints()) {
             if (constraint instanceof Clutter.AlignConstraint &&
                 constraint.align_axis === Clutter.AlignAxis.Y_AXIS) {
-                constraint.set_factor(factor);
+                if (constraint.factor !== factor) {
+                    constraint.set_factor(factor);
+                }
                 return;
             }
         }
@@ -377,6 +402,7 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
 
     _updateTitle(windowPreview) {
         const windowTitlePosition = this._settings.get_string('window-title-position');
+        this._clearBindConstraints(windowPreview._title);
         this._setYAlign(windowPreview._title, this._positionFactor(windowTitlePosition));
     }
 
@@ -388,6 +414,8 @@ export default class AlwaysShowTitlesInOverviewExtension extends Extension {
         }
 
         const appIconPosition = this._settings.get_string('app-icon-position');
+        this._clearBindConstraints(windowPreview._icon);
         this._setYAlign(windowPreview._icon, this._positionFactor(appIconPosition));
     }
+
 }

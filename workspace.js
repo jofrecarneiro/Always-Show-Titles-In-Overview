@@ -131,8 +131,9 @@ export class CustomWorkspace {
                                             if (windowPreview._closeButton && windowPreview._title) {
                                                 windowPreview._closeButton._originalVisibleAWSM = windowPreview._closeButton.visible;
                                                 windowPreview._title._originalVisibleAWSM = windowPreview._title.visible;
-                                                windowPreview._closeButton.hide();
-                                                windowPreview._title.hide();
+                                                // Use opacity instead of hide() to avoid layout passes during transitions
+                                                windowPreview._closeButton.opacity = 0;
+                                                windowPreview._title.opacity = 0;
                                                 this._allWindows.push(windowPreview);
                                             }
                                         });
@@ -154,6 +155,8 @@ export class CustomWorkspace {
         if (this._allWindows && this._allWindows.length) {
             this._allWindows.forEach(windowPreview => {
                 if (windowPreview && windowPreview._closeButton && windowPreview._title) {
+                    windowPreview._closeButton.opacity = 255;
+                    windowPreview._title.opacity = 255;
                     windowPreview._closeButton.visible = windowPreview._closeButton._originalVisibleAWSM;
                     windowPreview._title.visible = windowPreview._title._originalVisibleAWSM;
                 }
@@ -202,6 +205,8 @@ export class CustomWorkspace {
             const saved = new Map();
             let fx = 0;
             for (const wp of this._sortedWindows) {
+                if (!wp._cachedBoundingBox) continue;
+                
                 saved.set(wp, { x: wp._cachedBoundingBox.x, y: wp._cachedBoundingBox.y });
                 wp._cachedBoundingBox.x = fx - wp._cachedBoundingBox.width / 2;
                 wp._cachedBoundingBox.y = -wp._cachedBoundingBox.height / 2;
@@ -220,4 +225,5 @@ export class CustomWorkspace {
             return result;
         };
     }
+
 }
